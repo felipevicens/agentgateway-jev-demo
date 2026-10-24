@@ -56,8 +56,8 @@ instalar (ver [Dónde se instala cada cosa](#dónde-se-instala-cada-cosa)).
 ## 1. Clonar y claves
 
 ```bash
-git clone https://github.com/TU_USUARIO/TU_REPO.git
-cd TU_REPO
+git clone https://github.com/felipevicens/agentgateway-jev-demo.git
+cd agentgateway-jev-demo
 ```
 
 Crea el fichero `.env` a partir del ejemplo y rellena las claves. **Nunca se
