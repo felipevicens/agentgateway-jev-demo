@@ -1,0 +1,21 @@
+# claves
+.env
+
+# instalacion local (scripts/instalar.sh)
+.venv-local/
+bin/
+models/
+pylibs/
+llama.cpp/
+logs/
+catalog/
+
+# resultados y logs generados
+bench-results.json
+request-logs.db
+request-logs.db-*
+
+# python
+__pycache__/
+*.pyc
+.venv/

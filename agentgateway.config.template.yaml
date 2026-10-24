@@ -1,0 +1,116 @@
+# Config standalone de agentgateway (sin Kubernetes) para probar el
+# guardrail de JEV contra un modelo real via OpenRouter.
+#
+# Dos placeholders que jev_guardrail_agentgateway.py sustituye en tiempo de
+# arranque (agentgateway no soporta variables de entorno en el YAML, solo
+# valor inline o {file: ruta}):
+#   __OPENROUTER_API_KEY__  -> la key real. No commitear este fichero con la
+#                              key ya sustituida.
+#   __TYPESAFE_API_KEY__    -> la key de TypeSafe (JEV nativo).
+#   __CATALOG_FILE__        -> <repo>/catalog/model-catalog.compat.json (lo genera
+#                              scripts/catalogo_compatible.py).
+#   __DB_PATH__             -> ruta al SQLite de log de peticion (ver abajo).
+#
+# Esquema verificado empiricamente contra el binario `agentgateway` 1.6.0
+# instalado en local con `agentgateway --validate-only -f <este fichero>`.
+llm:
+  port: 4000
+  # Sin esto, el Playground de la propia UI de agentgateway (servida en
+  # http://localhost:15000/ui) no puede llamar a /v1/chat/completions desde
+  # el navegador: es un origen distinto (15000 vs 4000) y sin CORS explicito
+  # el navegador bloquea la peticion con "Browser access is not allowed".
+  policies:
+    cors:
+      allowOrigins:
+        - http://localhost:15000
+      allowHeaders:
+        - '*'
+      allowMethods:
+        - GET
+        - POST
+  models:
+    - name: openrouter
+      provider: openrouter
+      overrides:
+        # No uses un slug ":free": esos comparten pool y devuelven 429
+        # ("temporarily rate-limited upstream") con facilidad. Este es de
+        # pago pero muy barato (ver coste por token en openrouter.ai/models).
+        # OJO: evita el simbolo de moneda USD seguido de un digito en este
+        # fichero YAML, incluso en comentarios: agentgateway hace sustitucion
+        # de variables de entorno sobre el texto crudo antes de parsear, y
+        # eso rompe el arranque con "environment variable not found".
+        model: "openai/gpt-oss-20b"
+      auth:
+        key:
+          value: "__OPENROUTER_API_KEY__"
+      guardrails:
+        request:
+          - webhook:
+              target:
+                host: localhost:8000
+              failureMode: failClosed
+    # Segundo modelo: JEV por la API NATIVA de TypeSafe (api.typesafe.ai,
+    # clave TYPESAFE_API_KEY). Desde agentgateway 1.6.0 la ruta /v1/systemone
+    # se detecta sola: un custom sin "formats" ni "passthrough" basta, y el
+    # gateway registra modelo, tokens y duracion. La propia llamada del
+    # webhook pasa por aqui (mismo patron que el ejemplo oficial
+    # agentgateway/examples/llm-guardrail-jev).
+    - name: jev
+      provider:
+        custom: {}
+      params:
+        baseUrl: https://api.typesafe.ai
+      overrides:
+        model: "jev-latest"
+      auth:
+        key:
+          value: "__TYPESAFE_API_KEY__"
+
+    # Tercer modelo: Laya local (laya-serve, protocolo /v1/systemone de Jev).
+    # Sin "formats" ni "passthrough": desde agentgateway 1.6.0 la ruta
+    # /v1/systemone se detecta sola y el gateway registra modelo, tokens y
+    # duracion de la llamada igual que con JEV. Se llama a /v1/systemone
+    # (no a /v1/chat/completions: un custom sin formats no convierte chat).
+    - name: laya
+      provider:
+        custom: {}
+      params:
+        baseUrl: http://127.0.0.1:8100
+      overrides:
+        model: "laya"
+    # Mismo servidor, checkpoint multilingue (322M). Laya trata el campo "model"
+    # como seleccion de checkpoint: "laya" = ingles, "multilingual" = multilingue.
+    - name: laya-ml
+      provider:
+        custom: {}
+      params:
+        baseUrl: http://127.0.0.1:8100
+      overrides:
+        model: "multilingual"
+
+    # Cuarto modelo: Julia-1 local, servido por llama-server (llama.cpp, PR
+    # 29818) con su endpoint /v1/systemone. Mismo patron que laya.
+    - name: julia
+      provider:
+        custom: {}
+      params:
+        baseUrl: http://127.0.0.1:8200
+      overrides:
+        model: "julia"
+
+# Base de datos de logs de peticion (opt-in). Sin esto, las pestanas Logs y
+# Analytics de la UI de agentgateway (http://localhost:15000/ui) fallan con
+# "request log database is not configured", porque leen las peticiones de
+# aqui. __DB_PATH__ es la ruta a un fichero SQLite: segun el esquema del
+# binario, cualquier valor que no empiece por postgres:// o postgresql:// se
+# trata como SQLite. jev_guardrail_agentgateway.py lo sustituye por
+# <repo>/request-logs.db (gitignored).
+config:
+  # Precios de modelos para el calculo de costes. El catalogo de main ya no lo
+  # entiende agentgateway 1.6.0 (ver scripts/catalogo_compatible.py), asi que se
+  # carga una copia compatible como fuente adicional. Si el fichero no existe,
+  # el gateway avisa y usa su catalogo incorporado: no se rompe nada.
+  modelCatalog:
+    - file: "__CATALOG_FILE__"
+  database:
+    url: "__DB_PATH__"
