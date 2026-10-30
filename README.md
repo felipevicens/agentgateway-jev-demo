@@ -73,17 +73,36 @@ nano .env
 
 ## 2. Instalar agentgateway
 
-Descarga el binario de la release **v1.6.0** y **verifica su SHA256**. Si no
-coincide, el script aborta.
+Descarga el binario de la release **v1.7.0** (y `agctl`, su CLI) y **verifica el
+SHA256** de cada uno. Si no coincide, el script aborta. Si ya había una versión
+instalada, la guarda como `agentgateway.anterior`.
 
 ```bash
 ./scripts/instalar.sh gateway
 ```
 
-Qué hay de especial en la v1.6.0: detecta sola la ruta `/v1/systemone`, y un
-proveedor `custom` ya no necesita declarar `formats`. Por eso la plantilla
-[`agentgateway.config.template.yaml`](agentgateway.config.template.yaml)
-registra cada modelo con unas pocas líneas.
+Qué hay de especial en la v1.7.0 para System One:
+
+- **Soporte nativo de SystemOne** y de la **API Decisions de OpenAI**, con
+  traducción entre las dos en ambos sentidos.
+- **Proveedor propio de TypeSafe** (`provider: typesafe`): JEV se declara sin
+  `baseUrl` ni `formats`.
+- Los modelos locales se declaran como `custom` con el formato `systemOne`.
+- `agctl standalone analytics`: una tabla de peticiones, tokens y coste.
+
+Así queda, resumido, en la plantilla
+[`agentgateway.config.template.yaml`](agentgateway.config.template.yaml):
+
+```yaml
+- name: jev            # nube
+  provider: typesafe
+- name: laya           # local
+  provider:
+    custom:
+      formats: [{type: systemOne, path: /v1/systemone}]
+  params:
+    baseUrl: http://127.0.0.1:8100
+```
 
 ## 3. Instalar Laya
 
@@ -221,6 +240,17 @@ MODEL=laya ./demo_curl.sh
 Prueba también `MODEL=julia ./demo_curl.sh` y `MODEL=jev ./demo_curl.sh`. Las
 respuestas **no son iguales**: cada modelo reparte la probabilidad a su manera.
 
+### La misma pregunta con el formato de la API Decisions de OpenAI
+
+agentgateway 1.7.0 traduce entre la API Decisions de OpenAI y SystemOne, así que
+un cliente que solo habla Decisions funciona con JEV, Laya o Julia-1. Cambia el
+formato: el texto va en `input`, `questions` es una lista con `id`, y el sí/no
+se llama `predicate` (no `noul`). Se llama a `/v1/decisions`:
+
+```bash
+MODEL=laya ./demo_decisions.sh
+```
+
 ## 7. Benchmark de 24 casos
 
 Un guardrail de chat: tres evaluadores (`jailbreak`, `harmful`, `secrets`,
@@ -312,21 +342,36 @@ Julia-1 también puede servirse con `llama.cpp` (solo CPU). Primero lo compila
 ## 10. Costes y catálogo de precios
 
 El gateway guarda en su base de datos (`request-logs.db`) los tokens y el coste
-de cada llamada. Dos cosas a saber:
+de cada llamada. Un resumen por proveedor y modelo, con la CLI nueva de la 1.7.0:
 
-- **JEV** por la API nativa de TypeSafe devuelve tokens pero **no el coste**.
-  Se calcula con el precio publicado por OpenRouter (0,042 $ por millón de
-  tokens de entrada, salida sin coste), que está en
-  [`scripts/catalogo_compatible.py`](scripts/catalogo_compatible.py).
-  **Contrástalo con el de TypeSafe**: es el precio de otra vía.
-- El catálogo de precios que descarga el botón *Refresh base costs* de la
-  interfaz usa un formato que la v1.6.0 no entiende (fallo: `decode model
-  catalog from GitHub`). Por eso `lanzar_gateway.sh` genera una copia
-  compatible en `catalog/` y el gateway la carga solo. **No hace falta pulsar
-  ese botón.**
+```bash
+./scripts/analitica.sh
+```
+
+Para otras agrupaciones o rangos de tiempo, por ejemplo `./scripts/analitica.sh
+--by model --since 1h`. Todas las opciones: `agctl standalone analytics --help`.
+
+Dos cosas a saber sobre el coste:
+
+- **JEV** por la API nativa de TypeSafe devuelve tokens pero **no el coste**, y
+  el catálogo público de precios no lo incluye. Por eso la plantilla añade una
+  fuente de precios propia (`config.modelCatalog`) con el precio publicado por
+  OpenRouter: 0,042 $ por millón de tokens de entrada y salida sin coste.
+  **Contrástalo con el de TypeSafe**: es el precio de otra vía. Los modelos
+  locales cuestan 0.
+- El catálogo oficial de precios del gateway **ya se carga sin parches** en la
+  1.7.0. (Con la 1.6.0 fallaba, y hacía falta una copia adaptada.)
 
 ## 11. Problemas conocidos
 
+- **Si vienes de la 1.6.0:** en la 1.7.0 un proveedor `custom` sin `formats` ya
+  no acepta `/v1/systemone` (error 400 `unsupported conversion: from SystemOne
+  to provider custom`). Hay que declarar `formats: [{type: systemOne, path:
+  /v1/systemone}]`; sin el `path`, el gateway envía a otra ruta y el servidor
+  responde 404.
+- **Errores genéricos:** desde la 1.7.0, los errores que recibe el cliente no
+  llevan detalles internos (por ejemplo, `failed to process LLM request`). El
+  detalle completo está en el log del gateway.
 - **GPU antigua (por ejemplo, Maxwell):** las versiones recientes de PyTorch
   (`cu130`) no traen kernels para ella y fallan con `no kernel image is
   available`. Por eso el instalador usa `cu126`.
@@ -356,10 +401,10 @@ Para los servidores (gateway, webhook, Laya, Julia-1 y web):
 ./scripts/parar.sh
 ```
 
-Para borrar lo instalado (entorno, modelos, binario y catálogo):
+Para borrar lo instalado (entorno, modelos y binarios):
 
 ```bash
-rm -rf .venv-local bin models pylibs catalog llama.cpp
+rm -rf .venv-local bin models pylibs llama.cpp
 ```
 
 ## 13. Licencias y créditos

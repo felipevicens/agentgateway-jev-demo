@@ -12,8 +12,8 @@ Reutiliza los mismos evaluadores, escala y umbral de jev_guardrail.py, asi
 que el veredicto usa las mismas preguntas y el mismo criterio que el script
 standalone. A diferencia de jev_guardrail.py (que llama a OpenRouter
 directo con requests), este webhook llama a JEV A TRAVES del propio
-agentgateway (modelo "jev" en agentgateway.config.template.yaml, con
-passthrough: detect), igual que hace el ejemplo oficial
+agentgateway (modelo "jev" en agentgateway.config.template.yaml, con el
+proveedor nativo "typesafe" de la 1.7.0), igual que hace el ejemplo oficial
 agentgateway/examples/llm-guardrail-jev: asi el coste/latencia de la
 propia evaluacion del guard tambien queda registrado por el gateway, no
 solo el del modelo protegido.
@@ -30,18 +30,18 @@ from jev_guardrail import QUESTIONS, THRESHOLD
 
 HOST, PORT = "localhost", 8000
 GATEWAY = "http://localhost:4000"
-# Backend del juez: "jev" (de pago, via OpenRouter) o "laya" (local, laya-serve).
-# Se elige con GUARD_BACKEND=laya; ambos pasan por agentgateway.
+# Backend del juez: "jev" (API de TypeSafe), "laya" o "julia" (locales).
+# Se elige con GUARD_BACKEND=laya; todos pasan por agentgateway.
 BACKEND = os.environ.get("GUARD_BACKEND", "jev")
 
 
 def jev_via_gateway(state, questions):
     """Pregunta al juez (JEV, Laya o Julia-1) a traves de agentgateway.
 
-    Usa la ruta /v1/systemone, que agentgateway >= 1.6.0 detecta sola, asi que
-    el coste y la latencia del propio juez tambien quedan registrados.
+    Usa la ruta /v1/systemone, el formato nativo SystemOne de agentgateway
+    >= 1.7.0, asi que el coste y la latencia del propio juez tambien quedan
+    registrados.
     """
-    # Ruta /v1/systemone detectada por agentgateway >= 1.6.0, sin "messages".
     url = f"{GATEWAY}/v1/systemone"
     body = {"model": BACKEND, "state": state, "questions": questions}
     t0 = time.perf_counter()

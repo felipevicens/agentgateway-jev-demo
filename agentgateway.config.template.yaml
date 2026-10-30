@@ -1,18 +1,16 @@
-# Config standalone de agentgateway (sin Kubernetes) para probar el
-# guardrail de JEV contra un modelo real via OpenRouter.
+# Config standalone de agentgateway 1.7.0 (sin Kubernetes) para probar System
+# One: JEV (nube) y modelos locales detras del mismo gateway, mas un guardrail
+# delante de un modelo real de OpenRouter.
 #
-# Dos placeholders que jev_guardrail_agentgateway.py sustituye en tiempo de
-# arranque (agentgateway no soporta variables de entorno en el YAML, solo
-# valor inline o {file: ruta}):
-#   __OPENROUTER_API_KEY__  -> la key real. No commitear este fichero con la
-#                              key ya sustituida.
+# Placeholders que jev_guardrail_agentgateway.py sustituye en tiempo de arranque
+# (agentgateway no soporta variables de entorno en el YAML, solo valor inline o
+# {file: ruta}). No commitear este fichero con las keys ya sustituidas:
+#   __OPENROUTER_API_KEY__  -> la key de OpenRouter (solo el modelo protegido).
 #   __TYPESAFE_API_KEY__    -> la key de TypeSafe (JEV nativo).
-#   __CATALOG_FILE__        -> <repo>/catalog/model-catalog.compat.json (lo genera
-#                              scripts/catalogo_compatible.py).
 #   __DB_PATH__             -> ruta al SQLite de log de peticion (ver abajo).
 #
-# Esquema verificado empiricamente contra el binario `agentgateway` 1.6.0
-# instalado en local con `agentgateway --validate-only -f <este fichero>`.
+# Esquema verificado contra el binario `agentgateway` 1.7.0 con
+# `agentgateway --validate-only -f <este fichero renderizado>`.
 llm:
   port: 4000
   # Sin esto, el Playground de la propia UI de agentgateway (servida en
@@ -49,31 +47,31 @@ llm:
               target:
                 host: localhost:8000
               failureMode: failClosed
-    # Segundo modelo: JEV por la API NATIVA de TypeSafe (api.typesafe.ai,
-    # clave TYPESAFE_API_KEY). Desde agentgateway 1.6.0 la ruta /v1/systemone
-    # se detecta sola: un custom sin "formats" ni "passthrough" basta, y el
-    # gateway registra modelo, tokens y duracion. La propia llamada del
-    # webhook pasa por aqui (mismo patron que el ejemplo oficial
-    # agentgateway/examples/llm-guardrail-jev).
+
+    # JEV por la API nativa de TypeSafe. Desde agentgateway 1.7.0 hay un
+    # proveedor propio ("typesafe") que habla SystemOne de serie: no hace falta
+    # baseUrl ni formats. El gateway registra modelo, tokens y coste. La propia
+    # llamada del webhook de guardrail pasa por aqui (mismo patron que el
+    # ejemplo oficial agentgateway/examples/llm-guardrail-jev).
     - name: jev
-      provider:
-        custom: {}
-      params:
-        baseUrl: https://api.typesafe.ai
+      provider: typesafe
       overrides:
         model: "jev-latest"
       auth:
         key:
           value: "__TYPESAFE_API_KEY__"
 
-    # Tercer modelo: Laya local (laya-serve, protocolo /v1/systemone de Jev).
-    # Sin "formats" ni "passthrough": desde agentgateway 1.6.0 la ruta
-    # /v1/systemone se detecta sola y el gateway registra modelo, tokens y
-    # duracion de la llamada igual que con JEV. Se llama a /v1/systemone
-    # (no a /v1/chat/completions: un custom sin formats no convierte chat).
+    # Modelos locales: servidores propios que implementan /v1/systemone (Laya
+    # con laya-serve, Julia-1 con su runtime o con llama-server). Se declaran
+    # como proveedor custom con el formato systemOne y la ruta explicita; en la
+    # 1.7.0 un custom sin formats ya no acepta /v1/systemone, y sin "path" el
+    # gateway envia a otra ruta y el servidor responde 404.
     - name: laya
       provider:
-        custom: {}
+        custom:
+          formats:
+            - type: systemOne
+              path: /v1/systemone
       params:
         baseUrl: http://127.0.0.1:8100
       overrides:
@@ -82,35 +80,50 @@ llm:
     # como seleccion de checkpoint: "laya" = ingles, "multilingual" = multilingue.
     - name: laya-ml
       provider:
-        custom: {}
+        custom:
+          formats:
+            - type: systemOne
+              path: /v1/systemone
       params:
         baseUrl: http://127.0.0.1:8100
       overrides:
         model: "multilingual"
-
-    # Cuarto modelo: Julia-1 local, servido por llama-server (llama.cpp, PR
-    # 29818) con su endpoint /v1/systemone. Mismo patron que laya.
     - name: julia
       provider:
-        custom: {}
+        custom:
+          formats:
+            - type: systemOne
+              path: /v1/systemone
       params:
         baseUrl: http://127.0.0.1:8200
       overrides:
         model: "julia"
 
 # Base de datos de logs de peticion (opt-in). Sin esto, las pestanas Logs y
-# Analytics de la UI de agentgateway (http://localhost:15000/ui) fallan con
-# "request log database is not configured", porque leen las peticiones de
+# Analytics de la UI de agentgateway (http://localhost:15000/ui) y el comando
+# `agctl standalone analytics` no tienen datos, porque leen las peticiones de
 # aqui. __DB_PATH__ es la ruta a un fichero SQLite: segun el esquema del
 # binario, cualquier valor que no empiece por postgres:// o postgresql:// se
 # trata como SQLite. jev_guardrail_agentgateway.py lo sustituye por
 # <repo>/request-logs.db (gitignored).
 config:
-  # Precios de modelos para el calculo de costes. El catalogo de main ya no lo
-  # entiende agentgateway 1.6.0 (ver scripts/catalogo_compatible.py), asi que se
-  # carga una copia compatible como fuente adicional. Si el fichero no existe,
-  # el gateway avisa y usa su catalogo incorporado: no se rompe nada.
+  # Precios de modelos para el calculo de costes. El gateway ya trae su
+  # catalogo; esta fuente en linea anade lo que el catalogo publico no tiene:
+  # JEV (proveedor "typesafe") y los modelos locales (proveedor "custom"), estos
+  # a coste cero. Precio de JEV: 0,042 por millon de tokens de entrada y salida
+  # sin coste, segun la documentacion de OpenRouter (contrastar con TypeSafe: la
+  # API nativa no devuelve coste).
   modelCatalog:
-    - file: "__CATALOG_FILE__"
+    - inline:
+        providers:
+          typesafe:
+            models:
+              jev-latest:
+                rates: {input: "0.042", output: "0"}
+          custom:
+            models:
+              laya: {rates: {input: "0", output: "0"}}
+              multilingual: {rates: {input: "0", output: "0"}}
+              julia: {rates: {input: "0", output: "0"}}
   database:
     url: "__DB_PATH__"

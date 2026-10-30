@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Instala por partes lo necesario para el vídeo, desde cero y desde este repo.
 #
-#   ./scripts/instalar.sh gateway    # agentgateway (binario verificado con SHA256)
+#   ./scripts/instalar.sh gateway    # agentgateway y agctl (binarios verificados con SHA256)
 #   ./scripts/instalar.sh laya       # entorno Python + PyTorch + Laya (se baja solo al arrancar)
 #   ./scripts/instalar.sh julia      # descarga Julia-1 y su transformers 5.0.x aparte
 #   ./scripts/instalar.sh llamacpp   # opcional: compila llama-server (Julia-1 en CPU)
@@ -14,17 +14,25 @@ source "$(dirname "${BASH_SOURCE[0]}")/entorno.sh"
 
 espacio() { echo; echo ">> Espacio libre:"; df -h "$REPO" "$MODELS" 2>/dev/null | sort -u; }
 
-instalar_gateway() {
-  echo "== agentgateway $AGENTGATEWAY_VERSION"
-  mkdir -p "$BIN"
+# Descarga un binario de la release y comprueba su SHA256 antes de dejarlo en su sitio.
+descargar_verificado() {  # nombre_en_la_release destino
   local base="https://github.com/agentgateway/agentgateway/releases/download/$AGENTGATEWAY_VERSION"
-  curl -sSL -o "$BIN/agentgateway" "$base/agentgateway-linux-amd64"
   local esperado real
-  esperado=$(curl -sSL "$base/agentgateway-linux-amd64.sha256" | awk '{print $1}')
-  real=$(sha256sum "$BIN/agentgateway" | awk '{print $1}')
-  [ "$esperado" = "$real" ] || { echo "SHA256 NO coincide ($real != $esperado). Aborto."; rm -f "$BIN/agentgateway"; exit 1; }
-  chmod +x "$BIN/agentgateway"
-  echo "SHA256 verificado: $real"
+  curl -sSL -o "$2.tmp" "$base/$1"
+  esperado=$(curl -sSL "$base/$1.sha256" | awk '{print $1}')
+  real=$(sha256sum "$2.tmp" | awk '{print $1}')
+  [ "$esperado" = "$real" ] || { echo "SHA256 de $1 NO coincide ($real != $esperado). Aborto."; rm -f "$2.tmp"; exit 1; }
+  chmod +x "$2.tmp"; mv -f "$2.tmp" "$2"
+  echo "SHA256 verificado ($1): $real"
+}
+
+instalar_gateway() {
+  echo "== agentgateway $AGENTGATEWAY_VERSION y agctl"
+  mkdir -p "$BIN"
+  # Guarda la version anterior por si hay que volver atras.
+  if [ -x "$BIN/agentgateway" ]; then cp -f "$BIN/agentgateway" "$BIN/agentgateway.anterior"; fi
+  descargar_verificado agentgateway-linux-amd64 "$BIN/agentgateway"
+  descargar_verificado agctl-linux-amd64 "$BIN/agctl"
   "$BIN/agentgateway" --version | head -3
 }
 

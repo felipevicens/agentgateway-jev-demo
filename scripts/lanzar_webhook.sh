@@ -8,5 +8,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/entorno.sh"
 necesita_venv
 liberar_puerto "$PUERTO_WEBHOOK"
 cd "$REPO"
+GUARD_BACKEND="${GUARD_BACKEND:-jev}"
 echo "Webhook del guardrail ($GUARD_BACKEND) en :$PUERTO_WEBHOOK"
-GUARD_BACKEND="${GUARD_BACKEND:-jev}" PYTHONUNBUFFERED=1 exec "$PY" jev_guardrail_webhook.py
+GUARD_BACKEND="$GUARD_BACKEND" PYTHONUNBUFFERED=1 exec "$PY" jev_guardrail_webhook.py
